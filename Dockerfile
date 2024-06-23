@@ -95,5 +95,5 @@ RUN pip3 install tabulate
 RUN pip3 install matplotlib
 
 # Generate benchmarks
-RUN python3 /home/scripts/generate-table-5.py --generate
+RUN python3 /home/scripts/generate-table-7.py --generate
 RUN python3 /home/scripts/generate-plots.py --generate

@@ -1,88 +1,109 @@
-import argparse
 import os
-import shutil
 
 import env
 from utils import Utils
 
 
-data = [
-    { "name": "caslock", "grid": [2, 3], "bound": 2 },
-    { "name": "caslock-acq2rx", "grid": [4, 2], "bound": 1 },
-    { "name": "caslock-rel2rx", "grid": [4, 2], "bound": 1 },
-    { "name": "caslock-dv2wg", "grid": [4, 1], "bound": 2 },
-    { "name": "caslock-dv2wg", "grid": [4, 2], "bound": 1 },
-
-    { "name": "ticketlock", "grid": [2, 3], "bound": 1 },
-    { "name": "ticketlock-acq2rx", "grid": [4, 2], "bound": 1 },
-    { "name": "ticketlock-rel2rx", "grid": [4, 2], "bound": 1 },
-    { "name": "ticketlock-dv2wg", "grid": [4, 1], "bound": 2 },
-    { "name": "ticketlock-dv2wg", "grid": [4, 2], "bound": 1 },
-
-    { "name": "ttaslock", "grid": [2, 2], "bound": 4 },
-    { "name": "ttaslock-acq2rx", "grid": [4, 2], "bound": 1 },
-    { "name": "ttaslock-rel2rx", "grid": [4, 2], "bound": 1 },
-    { "name": "ttaslock-dv2wg", "grid": [4, 1], "bound": 4 },
-    { "name": "ttaslock-dv2wg", "grid": [4, 2], "bound": 1 },
-
-    { "name": "xf-barrier", "grid": [3, 3], "bound": 9 },
-    { "name": "xf-barrier-acq2rx-1", "grid": [2, 2], "bound": 4 },
-    { "name": "xf-barrier-acq2rx-2", "grid": [2, 2], "bound": 4 },
-    { "name": "xf-barrier-rel2rx-1", "grid": [2, 2], "bound": 4 },
-    { "name": "xf-barrier-rel2rx-2", "grid": [2, 2], "bound": 4 },
-]
+def run_dartagnan_tests(path, cat, property, target):
+    with open(os.path.join("/home/Dat3M/dartagnan/src/test/resources/", path), "r") as f:
+        lines = (line.rstrip() for line in f)
+        tests = [line.split(",")[0] for line in lines if line]
+    time = sum([Utils.run_dartagnan_test(test, cat, property, target).time for test in tests])
+    return time, len(tests)
 
 
-def get_template_filename(entry):
-    return os.path.join(env.TEMPLATES_DIR, entry["name"] + ".spv.dis")
+def run_ptx_alloy_tests():
+    tests = Utils.list_files(os.path.join(env.ALLOY_PTX_HOME, "tests"), ".test")
+    time = 0
+    count = 0
+    for test in tests:
+        result = Utils.run_alloy_ptx_test(test)
+        time += result.time
+        count += result.out.count("Launching Alloy...")
+    return time, count
 
 
-def get_benchmark_filename(entry):
-    return os.path.join(env.BENCHMARKS_DIR, "spirv",
-        entry["name"] + "-" + str(entry["grid"][0] * entry["grid"][1]) + ".spv.dis")
-
-
-def format_result(result):
-    if result == "PASS":
-        return "\\cmark"
-    if result == "FAIL":
-        return "\\xmark"
-    raise ValueError(f"Invalid verification result: {result}")
-
-
-def generate_benchmarks():
-    os.makedirs(os.path.join(env.BENCHMARKS_DIR, "spirv"), exist_ok=True)
-    for entry in data:
-        with open(get_template_filename(entry), "r") as f_src:
-            with open(get_benchmark_filename(entry), "w") as f_dst:
-                f_dst.write(f"; @Config: {entry['grid'][0]}, 1, {entry['grid'][1]}\n")
-                f_dst.write(f_src.read())
-
-
-def run_benchmarks():
-    table = [["Program", "Grid", "Threads", "Events", "Result", "Time"]]
-    for entry in data:
-        path = get_benchmark_filename(entry)
-        result = Utils.run_dartagnan_test(path, "spirv", "cat_spec", "vulkan", bound=entry["bound"])
-        table.append([
-                    entry['name'],
-                    f"{entry['grid'][0]}.{entry['grid'][1]}",
-                    f"{entry['grid'][0] * entry['grid'][1]}",
-                    result.events,
-                    format_result(result.result),
-                    f"{result.time:.0f}"
-                ])
-    Utils.print_table("table5.csv", table)
+def run_vulkan_alloy_tests():
+    tests = Utils.list_files(os.path.join(env.ALLOY_VKN_HOME, "tests"), ".test")
+    time = sum([Utils.run_alloy_vkn_test(test).time for test in tests])
+    safety_check = 0
+    dr_check = 0
+    for file in tests:
+        with open(file, "r") as f:
+            for line in f.readlines():
+                if "#dr=0" in line:
+                    safety_check += 1
+                elif "#dr>0" in line:
+                    dr_check += 1
+                elif "NOSOLUTION" in line or "SATISFIABLE" in line:
+                    safety_check += 1
+    return time, safety_check, dr_check
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--generate-tests", dest="generate", action="store_true")
-    args = parser.parse_args()
-    if args.generate:
-        generate_benchmarks()
-    else:
-        run_benchmarks()
+    # Run Alloy Dat3M
+    dat3m_ptx60_safety_time, dat3m_ptx60_safety_size = run_dartagnan_tests(
+        "PTXv6_0-expected.csv", "ptx-v6.0", "program_spec", "ptx")
+    dat3m_ptx75_safety_time, dat3m_ptx75_safety_size = run_dartagnan_tests(
+        "PTXv7_5-expected.csv", "ptx-v7.5", "program_spec", "ptx")
+    dat3m_ptx60_liveness_time, dat3m_ptx60_liveness_size = run_dartagnan_tests(
+        "PTXv6_0-Liveness-expected.csv", "ptx-v6.0", "liveness", "ptx")
+    dat3m_ptx75_liveness_time, dat3m_ptx75_liveness_size = run_dartagnan_tests(
+        "PTXv7_5-Liveness-expected.csv", "ptx-v7.5", "liveness", "ptx")
+
+    dat3m_ptx60_total_size = dat3m_ptx60_safety_size + dat3m_ptx60_liveness_size
+    dat3m_ptx60_total_time = dat3m_ptx60_safety_time + dat3m_ptx60_liveness_time
+    dat3m_ptx60_total_average = dat3m_ptx60_total_time / dat3m_ptx60_total_size
+    dat3m_ptx75_total_size = dat3m_ptx75_safety_size + dat3m_ptx75_liveness_size
+    dat3m_ptx75_total_time = dat3m_ptx75_safety_time + dat3m_ptx75_liveness_time
+    dat3m_ptx75_total_average = dat3m_ptx75_total_time / dat3m_ptx75_total_size
+
+    dat3m_vkn_safety_time, dat3m_vkn_safety_size = run_dartagnan_tests(
+        "VULKAN-expected.csv", "spirv", "program_spec", "vulkan")
+    dat3m_vkn_safety_time_nochains, dat3m_vkn_safety_size_nochains = run_dartagnan_tests(
+        "VULKAN-NOCHAINS-expected.csv", "spirv-nochains", "program_spec", "vulkan")
+    dat3m_vkn_liveness_time, dat3m_vkn_liveness_size = run_dartagnan_tests(
+        "VULKAN-Liveness-expected.csv", "spirv", "liveness", "vulkan")
+    dat3m_vkn_dr_time, dat3m_vkn_dr_size = run_dartagnan_tests(
+        "VULKAN-DR-expected.csv", "spirv", "cat_spec", "vulkan")
+    dat3m_vkn_dr_time_nochains, dat3m_vkn_dr_size_nochains = run_dartagnan_tests(
+        "VULKAN-DR-NOCHAINS-expected.csv", "spirv-nochains", "cat_spec", "vulkan")
+
+    dat3m_vkn_safety_time += dat3m_vkn_safety_time_nochains
+    dat3m_vkn_safety_size += dat3m_vkn_safety_size_nochains
+    dat3m_vkn_dr_time += dat3m_vkn_dr_time_nochains
+    dat3m_vkn_dr_size += dat3m_vkn_dr_size_nochains
+
+    dat3m_vkn_total_size = dat3m_vkn_safety_size + dat3m_vkn_liveness_size + dat3m_vkn_dr_size
+    dat3m_vkn_total_time = dat3m_vkn_safety_time + dat3m_vkn_liveness_time + dat3m_vkn_dr_time
+    dat3m_vkn_total_average = dat3m_vkn_total_time / dat3m_vkn_total_size
+
+    # Run Alloy PTX
+    alloy_ptx75_total_time, alloy_ptx75_safety_size = run_ptx_alloy_tests()
+    alloy_ptx75_total_size = alloy_ptx75_safety_size
+    alloy_ptx75_total_average = alloy_ptx75_total_time / alloy_ptx75_total_size
+
+    # Run Alloy Vulkan
+    alloy_vkn_total_time, alloy_vkn_safety_size, alloy_vkn_dr_size = run_vulkan_alloy_tests()
+    alloy_vkn_total_size = alloy_vkn_safety_size + alloy_vkn_dr_size
+    alloy_vkn_total_average = alloy_vkn_total_time / alloy_vkn_total_size
+
+    table = [
+        ["Tool", "Model", "Safety", "Liveness", "DRF", "Total", "Time", "Time/Tests"],
+        ["\\dartagnan", "PTX6.0", dat3m_ptx60_safety_size, dat3m_ptx60_liveness_size, 0, dat3m_ptx60_total_size,
+         f"{dat3m_ptx60_total_time:.0f}", f"{dat3m_ptx60_total_average:.0f}"],
+        ["\\alloy", "PTX6.0", 0, 0, 0, 0, 0, 0],
+        ["\\dartagnan", "PTX7.5", dat3m_ptx75_safety_size, dat3m_ptx75_liveness_size, 0, dat3m_ptx75_total_size,
+         f"{dat3m_ptx75_total_time:.0f}", f"{dat3m_ptx75_total_average:.0f}"],
+        ["\\alloy", "PTX7.5", alloy_ptx75_safety_size, 0, 0, alloy_ptx75_total_size,
+         f"{alloy_ptx75_total_time:.0f}", f"{alloy_ptx75_total_average:.0f}"],
+        ["\\dartagnan", "Vulkan", dat3m_vkn_safety_size, dat3m_vkn_liveness_size, dat3m_vkn_dr_size,
+         dat3m_vkn_total_size, f"{dat3m_vkn_total_time:.0f}", f"{dat3m_vkn_total_average:.0f}"],
+        ["\\alloy", "Vulkan", alloy_vkn_safety_size, 0, alloy_vkn_dr_size, alloy_vkn_total_size,
+         f"{alloy_vkn_total_time:.0f}", f"{alloy_vkn_total_average:.0f}"],
+    ]
+
+    Utils.print_table("table5.csv", table)
 
 
 if __name__ == "__main__":
