@@ -26,7 +26,7 @@ def main():
     time = sum([Utils.run_gpuverify_test(test).time for test in tests])
     table.append(["\\gpuverify", len(tests), f"{time:.0f}", f"{(time / len(tests)):.0f}"])
 
-    Utils.print_table("table4.csv", table)
+    Utils.print_table("table6.csv", table)
 
 
 if __name__ == "__main__":
